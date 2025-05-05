@@ -14,12 +14,9 @@ USE_DUMMY_SERIAL = True    # replace real Serial with a logger
 CSV_PATH = "angle_log.csv"
 
 # Dummy Serial stub
-
-
 class DummySerial:
     def write(self, data):
         print("SERIAL OUT ►", data.decode().strip())
-
 
 # ── SETUP ──────────────────────────────────────────────────────────────────────
 # 1) MediaPipe Hands
@@ -30,6 +27,10 @@ hands = mp_hands.Hands(static_image_mode=False,
                        min_tracking_confidence=0.7)
 mp_draw = mp.solutions.drawing_utils
 
+# Pose module added for cleanup
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose()
+
 # 2) Video capture
 cap = cv2.VideoCapture(0)
 
@@ -38,7 +39,7 @@ if ENABLE_CSV_LOG:
     csv_file = open(CSV_PATH, "w", newline="")
     csv_writer = csv.writer(csv_file)
     csv_writer.writerow(["timestamp", "frame", "a0",
-                        "a1", "a2", "a3", "a4", "a5"])
+                         "a1", "a2", "a3", "a4", "a5"])
 
 # 4) Serial port (or dummy)
 if USE_DUMMY_SERIAL:
@@ -49,28 +50,40 @@ else:
     time.sleep(2)
 
 # ── HELPERS ────────────────────────────────────────────────────────────────────
-
-
 def send_to_serial(angles):
     """Send 'a0,a1,...,a5\\n' over ser."""
     line = ",".join(str(int(np.clip(a, 0, 180))) for a in angles) + "\n"
     ser.write(line.encode())
 
-
 def overlay_angles(frame, angles):
-    """Draw joint indices + values on the top left corner."""
+    """Draw joint indices + values in the top left corner."""
     for i, a in enumerate(angles):
         text = f"{i}:{int(a):3d}"
         cv2.putText(frame, text, (10, 30 + i*20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
     print("Angles ▶", ["%3.0f" % a for a in angles])
 
-
 def log_csv(frame_idx, angles):
     """Write timestamp, frame index, and angles to CSV."""
     timestamp = time.time()
     csv_writer.writerow([timestamp, frame_idx] + [f"{a:.1f}" for a in angles])
 
+def all_fingers_extended(hand_landmarks):
+    """Return True if thumb and all four fingers are extended."""
+    # Thumb: check if tip.x is greater than joint.x (right hand)
+    thumb_tip = hand_landmarks.landmark[4]
+    thumb_joint = hand_landmarks.landmark[2]
+    thumb_extended = thumb_tip.x > thumb_joint.x
+
+    # Other fingers: tip.y < pip.y means extended (top of screen is 0)
+    finger_tips = [8, 12, 16, 20]
+    finger_pips = [6, 10, 14, 18]
+    fingers_extended = 0
+    for tip, pip in zip(finger_tips, finger_pips):
+        if hand_landmarks.landmark[tip].y < hand_landmarks.landmark[pip].y:
+            fingers_extended += 1
+
+    return thumb_extended and fingers_extended == 4
 
 # ── MAIN LOOP ─────────────────────────────────────────────────────────────────
 def main():
@@ -109,7 +122,8 @@ def main():
                 if ENABLE_CSV_LOG:
                     log_csv(frame_idx, angles)
                 # 4) (Optionally) send to robot or dummy:
-                send_to_serial(angles)
+                if all_fingers_extended(hand):
+                    send_to_serial(angles)
 
             # show the feed
             cv2.imshow('Hand Tracker Test', frame)
@@ -121,10 +135,10 @@ def main():
     finally:
         cap.release()
         hands.close()
+        pose.close()  # ensure pose module is properly closed
         cv2.destroyAllWindows()
         if ENABLE_CSV_LOG:
             csv_file.close()
-
 
 if __name__ == "__main__":
     main()
