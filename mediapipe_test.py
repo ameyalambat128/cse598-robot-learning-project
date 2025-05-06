@@ -45,7 +45,7 @@ if USE_DUMMY_SERIAL:
     ser = DummySerial()
 else:
     import serial
-    ser = serial.Serial('/dev/tty.usbmodem14101', 9600, timeout=1)
+    ser = serial.Serial('/dev/cu.usbmodem1401', 9600, timeout=1)
     time.sleep(2)
 
 # ── HELPERS ────────────────────────────────────────────────────────────────────
